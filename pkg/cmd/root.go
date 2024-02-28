@@ -15,6 +15,10 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/open-policy-agent/opa/rego"
 	"github.com/spf13/cobra"
 	"github.com/tektoncd/catlin/pkg/app"
 	"github.com/tektoncd/catlin/pkg/cmd/bump"
@@ -23,7 +27,7 @@ import (
 )
 
 func Root(cli app.CLI) *cobra.Command {
-	var cmd = &cobra.Command{
+	cmd := &cobra.Command{
 		Use:          "catlin",
 		Short:        "Lints Tekton Resources and Catalogs",
 		Long:         ``,
@@ -31,10 +35,51 @@ func Root(cli app.CLI) *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		eval(cli),
 		validate.Command(cli),
 		linter.Command(cli),
 		bump.Command(cli),
 	)
+
+	return cmd
+}
+
+func eval(cli app.CLI) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "eval",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			/*
+				https://pkg.go.dev/github.com/open-policy-agent/opa/rego#example-Rego.Eval-Storage
+				https://github.com/enterprise-contract/ec-policies/blob/main/policy/lib/bundles.rego
+				https://github.com/enterprise-contract/ec-cli/blob/main/cmd/validate/input.go
+			*/
+			ctx := context.Background()
+
+			// Create query that returns a single boolean value.
+			rego := rego.New(
+				rego.Query("data.authz.allow"),
+				rego.Module("example.rego",
+					`package authz
+
+default allow = false
+allow {
+	input.open == "sesame"
+}`,
+				),
+				rego.Input(map[string]interface{}{"open": "bar", "foo": "baz"}),
+			)
+
+			// Run evaluation.
+			rs, err := rego.Eval(ctx)
+			if err != nil {
+				panic(err)
+			}
+
+			// Inspect result.
+			fmt.Println("allowed:", rs.Allowed())
+			return nil
+		},
+	}
 
 	return cmd
 }
